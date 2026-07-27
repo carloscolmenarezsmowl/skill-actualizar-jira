@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Empaquetado de la skill
+*.skill
+
+# Logs
+*.log
+
+# Entornos
+.env
+.env.local
