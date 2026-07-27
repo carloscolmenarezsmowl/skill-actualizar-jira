@@ -1,8 +1,8 @@
 # actualizar-jira
 
-Skill del equipo de Smowltech que **actualiza** issues de Jira ya existentes siguiendo las convenciones internas: rellenar descripciones con plantilla, comentar hitos, transicionar estados, ajustar labels. Tras la actualización, comprueba que la rama git local contiene el ID del issue y, si no, **crea automáticamente la rama correcta preservando los cambios en curso**.
+Skill del equipo de Smowltech que **actualiza** issues de Jira ya existentes siguiendo las convenciones internas: rellenar descripciones con plantilla, comentar hitos, transicionar estados, ajustar labels o assignee. Tras la actualización, comprueba que la rama git local contiene el ID del issue y, si no, **crea la rama correcta preservando los cambios en curso**.
 
-**No crea issues ni subtasks.** La creación queda como responsabilidad del desarrollador, que conoce mejor el proyecto destino, tipo de issue y campos custom requeridos. La skill se centra exclusivamente en escribir sobre tickets ya creados.
+**No crea issues ni subtasks, ni enlaza issues entre sí.** Esas operaciones quedan como responsabilidad del desarrollador, que conoce mejor el proyecto destino, tipo de issue y campos custom requeridos. La skill se centra exclusivamente en escribir sobre tickets ya creados.
 
 ## Dependencia: MCP de Atlassian
 
@@ -20,11 +20,13 @@ Disparadores típicos:
 - "transiciona GOT-431 a Code Review"
 - "ponle el label `needs-qa` al GOT-431"
 - "completa los criterios de aceptación del GOT-431"
+- "el GOT-431 tiene la descripción muy floja, redáctala bien"
 
 Casos que **no** son para esta skill (y la skill te lo dirá):
 
-- "crea un issue en Jira para esto" → fuera de alcance. El desarrollador lo crea a mano.
+- "crea un issue en Jira para esto" → fuera de alcance. El desarrollador lo crea a mano; la skill le prepara el resumen y la descripción para pegar.
 - "crea la subtask de DoD" → fuera de alcance. La crea el desarrollador a mano y le pega el contenido generado por la skill `generar-dod`.
+- "enlaza el GOT-431 con el GOT-500" → fuera de alcance. Los links entre issues los gestiona el desarrollador.
 
 ## Instalación
 
@@ -44,7 +46,7 @@ mkdir -p .claude/skills
 git clone https://github.com/<TU-USUARIO>/actualizar-jira.git .claude/skills/actualizar-jira
 ```
 
-Tras clonar, en una sesión de Claude Code ejecuta `/reload-plugins`. Asegúrate de tener el MCP de Atlassian conectado en tu configuración de Claude Code, si no la skill operará en modo degradado.
+Tras clonar, reinicia la sesión de Claude Code para que recoja la skill (`/doctor` ayuda a diagnosticar si no aparece). Asegúrate de tener el MCP de Atlassian conectado en tu configuración de Claude Code, si no la skill operará en modo degradado.
 
 ### GitHub Copilot
 
@@ -87,15 +89,30 @@ La skill:
 2. Detecta el tipo (`Story`) y aplica la plantilla correspondiente con secciones Contexto, Objetivo, Alcance, Criterios de aceptación, Notas técnicas y Referencias.
 3. Confirma la edición.
 4. Llama a `editJiraIssue` para actualizar la descripción.
-5. Consulta transiciones disponibles y mueve a `In Progress`.
-6. **Comprueba la rama git local**. Si estás en `dev` o en una rama sin `GOT-431`, crea automáticamente `feature/GOT-431-permitir-login-con-saml` con `git checkout -b`, preservando los cambios sin commitear.
+5. Consulta transiciones disponibles con `getTransitionsForJiraIssue` (empareja por nombre, no por id) y mueve a `In Progress`.
+6. **Comprueba la rama git local** y la alinea con el issue (ver abajo).
+
+## Alineamiento de rama git
+
+Solo se ejecuta tras acciones de **escritura** sobre el issue (editar, comentar un hito de trabajo, transicionar a un estado activo) — nunca tras una simple lectura. La skill mira la rama actual y decide:
+
+| Rama actual | Comportamiento |
+| --- | --- |
+| Ya contiene el key del issue | No hace nada. |
+| Rama base (`develop` / `main` / `master`) | Crea la rama nueva **sin pedir confirmación** y lo notifica. |
+| Contiene **otro** key de Jira | **Pregunta primero** — puede que estés trabajando a propósito ahí. |
+| Rama sin key y no base (`wip-pruebas`, `temp-debug`) | **Pregunta primero.** |
+
+Usa `git checkout -b`, que arrastra los cambios sin commitear a la rama nueva — deliberadamente **no** usa `git stash`. Se detiene sin tocar nada si hay un merge/rebase/cherry-pick a medias o estás en detached HEAD, y nunca borra la rama anterior sin confirmación explícita.
 
 ## Convenciones que asume
 
-- **Prefijo de Jira**: `GOT-` (hardcodeado en regex de detección de rama). Cambia para otros proyectos.
-- **Estados de Jira**: nombres habituales del flujo del equipo (`In Progress`, `Code Review`, `Ready for QA`, `In QA`, `Done`). La skill consulta las transiciones disponibles vía MCP antes de actuar, así que aguanta variaciones — pero el mapping "momento del flujo → estado destino" está pensado para este flujo.
-- **Convención de rama**: `<tipo>/<KEY>-<slug>` donde `<tipo>` se deriva del `issueType` (Story/Task/Improvement → `feature`, Bug → `bugfix`, Hotfix → `hotfix`, resto → `chore`).
-- **No crea issues ni subtasks**: decisión deliberada del equipo. Si lo quieres habilitar, edita la lista de tools permitidos en el SKILL.md.
+- **Prefijo de Jira**: los ejemplos usan `GOT-`, pero la detección de rama se hace con el key real del issue que se está actualizando, así que funciona con cualquier prefijo de proyecto.
+- **Estados de Jira**: nombres habituales del flujo del equipo (`In Progress`, `In Review`/`Code Review`, `Ready for QA`, `In QA`, `Done`). La skill consulta las transiciones disponibles vía MCP antes de actuar, así que aguanta variaciones — pero el mapping "momento del flujo → estado destino" está pensado para este flujo.
+- **Ramas base del equipo**: `develop`, `main`, `master`.
+- **Convención de rama**: `<tipo>/<KEY>-<slug>` donde `<tipo>` se deriva del `issueType` (Story/Task/Improvement/New Feature → `feature`, Bug → `bugfix`, Hotfix → `hotfix`, resto → `chore`) y `<slug>` sale del `summary` sin acentos, recortado a ~6 palabras o ~50 caracteres.
+- **Descripciones y comentarios en ADF**: Jira Cloud no acepta Markdown; la skill convierte siguiendo [`references/adf.md`](./references/adf.md).
+- **No crea issues, subtasks ni links entre issues**: decisión deliberada del equipo. Si lo quieres habilitar, edita la lista de tools permitidos en el SKILL.md.
 
 ## Estructura del repo
 
@@ -111,4 +128,3 @@ actualizar-jira/
 ## License
 
 Internal use — Smowltech, S.L. No redistribuir fuera del equipo sin autorización.
-# skill-actualizar-jira
